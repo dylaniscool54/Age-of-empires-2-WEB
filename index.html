@@ -1,0 +1,177 @@
+<head>
+  <script src="https://cdn.glitch.global/266c51d7-8fa0-473e-aabc-8bbc01617388/mainemu.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #1a1a1a;
+      margin: 0;
+      padding: 0;
+      color: white;
+      overflow: hidden;
+    }
+    #screen_container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background-color: #333;
+      width: 100vw !important;
+      height: 100vh !important;
+    }
+    canvas {
+      width: 100vw !important;
+      height: 100vh !important;
+    }
+  </style>
+</head>
+<body>
+  <p id="loadingtxt">-</p>
+  <progress id="progressBar"></progress>
+  <div id="screen_container">
+    <div style="white-space: pre; font: 14px monospace; line-height: 14px"></div>
+    <canvas style="display: none"></canvas>
+    <img style="display: none; user-select: none;" id="fixsound" src="https://cdn.glitch.global/e4eb72c7-d339-4628-9a7a-a99205dfe71a/New%20Project%20(4).png">
+  </div>
+
+  <script>
+    function delay(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async function fetchWithProgress(url, progressCallback) {
+      const response = await fetch(url, { cache: "force-cache" });
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      const contentLength = response.headers.get('Content-Length');
+      if (!contentLength) throw new Error('Content-Length response header unavailable');
+      const total = parseInt(contentLength, 10);
+      let loaded = 0;
+      const reader = response.body.getReader();
+      const stream = new ReadableStream({
+        start(controller) {
+          function read() {
+            reader.read().then(({ done, value }) => {
+              if (done) {
+                controller.close();
+                return;
+              }
+              loaded += value.byteLength;
+              progressCallback(loaded, total);
+              controller.enqueue(value);
+              read();
+            }).catch(error => {
+              console.error(error);
+              controller.error(error);
+            });
+          }
+          read();
+        }
+      });
+      return new Response(stream);
+    }
+
+    async function loadgame() {
+      const drive = [
+        "https://cdn.glitch.me/7ef48d40-458f-4cec-8e53-da16e95c3f5c/win98.img_1.bin",
+        "https://cdn.glitch.me/7ef48d40-458f-4cec-8e53-da16e95c3f5c/win98.img_2.bin",
+        "https://cdn.glitch.me/7ef48d40-458f-4cec-8e53-da16e95c3f5c/win98.img_3.bin",
+        "https://cdn.glitch.me/7ef48d40-458f-4cec-8e53-da16e95c3f5c/win98.img_4.bin",
+        "https://cdn.glitch.me/7ef48d40-458f-4cec-8e53-da16e95c3f5c/win98.img_5.bin",
+        "https://cdn.glitch.me/7ef48d40-458f-4cec-8e53-da16e95c3f5c/win98.img_6.bin",
+        "https://cdn.glitch.me/7ef48d40-458f-4cec-8e53-da16e95c3f5c/win98.img_7.bin",
+        "https://cdn.glitch.me/7ef48d40-458f-4cec-8e53-da16e95c3f5c/win98.img_8.bin"
+      ];
+
+      const screenContainer = document.getElementById('screen_container');
+      screenContainer.addEventListener('click', function() {
+        lockPointer();
+      });
+
+      function lockPointer() {
+        screenContainer.requestPointerLock().then(() => {
+          document.documentElement.style.pointerEvents = 'none';
+          document.addEventListener('pointerlockchange', pointerLockChange);
+        }).catch((err) => {
+          document.documentElement.style.pointerEvents = 'auto';
+        });
+      }
+
+      function pointerLockChange() {
+        if (document.pointerLockElement === screenContainer) {
+          // Pointer locked
+        } else {
+          document.documentElement.style.pointerEvents = 'auto';
+          document.removeEventListener('pointerlockchange', pointerLockChange);
+        }
+      }
+
+      const loadingtext = document.getElementById("loadingtxt");
+      const progressBar = document.getElementById("progressBar");
+
+      const progressCallback = (loaded, total) => {
+        loadingtext.textContent = `Loading Age of Empires 2 [${((loaded / total) * 100).toFixed(2)}%]`;
+        progressBar.value = (loaded / total);
+      };
+
+      const stater = await fetchWithProgress("https://cdn.glitch.me/7ef48d40-458f-4cec-8e53-da16e95c3f5c/aoe2sound.bin.zst", progressCallback);
+      let statres = await stater.blob();
+
+      loadingtext.remove();
+      progressBar.remove();
+      window.chunksize = 256;
+
+      document.getElementById("fixsound").style.display = "";
+      document.addEventListener("click", async function() {
+        if (document.getElementById("fixsound")) {
+          document.getElementById("fixsound").remove();
+
+          const emulator = new V86({
+            wasm_path: "https://cdn.glitch.global/266c51d7-8fa0-473e-aabc-8bbc01617388/v86.wasm",
+            bios: {
+              url: "https://cdn.glitch.global/266c51d7-8fa0-473e-aabc-8bbc01617388/seabios.bin"
+            },
+            vga_bios: {
+              url: "https://cdn.glitch.global/266c51d7-8fa0-473e-aabc-8bbc01617388/vgabios.bin"
+            },
+            hda: {
+              url: drive,
+              size: 2 * 1024 * 1024 * 1024,
+              async: true
+            },
+            memory_size: 512 * 1024 * 1024,
+            screen_container: screenContainer,
+            autostart: false
+          });
+
+          var filereader = new FileReader();
+          filereader.onload = async function(e) {
+            while (true) {
+              try {
+                await emulator.restore_state(e.target.result);
+                emulator.run();
+                statres = null;
+                break;
+              } catch(err) {
+                console.log(err);
+                await delay(1000);
+              }
+            }
+          };
+          await filereader.readAsArrayBuffer(statres);
+        }
+      });
+
+      window.drives = [];
+
+      for (const imgurl of drive) {
+        const thisimg = await fetch(imgurl);
+        const toblob = await thisimg.blob();
+        const blobUrl = URL.createObjectURL(toblob);
+        window.drives.push(blobUrl);
+        console.log("Preloaded chunk " + imgurl);
+      }
+      console.log("Entire drive has been preloaded");
+    }
+
+    loadgame();
+  </script>
+</body>
+</html>
